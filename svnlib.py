@@ -2,6 +2,12 @@
 __author__ = 'root'
 import pysvn
 import time
+import locale
+from urllib import quote
+from sys import exit
+
+locale.setlocale(locale.LC_ALL, "")
+# print locale.getlocale(locale.LC_ALL)
 
 
 class svn:
@@ -35,7 +41,7 @@ class svn:
     kind : file
     last_changed_rev : <Revision kind=number 21067>
     last_changed_author : test
-    URL : https://192.168.11.249/svn/www/test/xxxx.xx
+    URL : https://192.168.11.249/svn/www/test/xx.dat
     lock : None
     rev : <Revision kind=number 21165>
     repos_root_URL : https://192.168.11.249/svn/www
@@ -92,7 +98,14 @@ class svn:
         self.checkOut(path=path, version=version)
 
     def checkNewest(self, path):
-        self.client.update(path)
+        try:
+            self.client.update(path)
+        except:
+            try:
+                self.client.update(path.decode('utf8'))
+            except Exception, e:
+                print 'update file newest failed.',
+                raise NameError, e
 
     def add(self, path, msg=''):
         # self.client.cleanup(path)
@@ -140,11 +153,33 @@ class svn:
             entries = self.log_max_entry
         else:
             entries = self.log_min_entry
-        return self.client.log(path, revision_start=pysvn.Revision(pysvn.opt_revision_kind.head),
-                               revision_end=pysvn.Revision(pysvn.opt_revision_kind.number, 0),
-                               peg_revision=pysvn.Revision(pysvn.opt_revision_kind.unspecified),
-                               discover_changed_paths=False,
-                               limit=entries)
+        try:
+            return self.client.log(path, revision_start=pysvn.Revision(pysvn.opt_revision_kind.head),
+                                   revision_end=pysvn.Revision(pysvn.opt_revision_kind.number, 0),
+                                   peg_revision=pysvn.Revision(pysvn.opt_revision_kind.unspecified),
+                                   discover_changed_paths=False,
+                                   limit=entries)
+
+        except Exception, e:
+            try:
+                # 'path' is unicode
+                if path.find('://') and isinstance(path, unicode):
+                    sequence = path.encode('utf8').split('://')
+                    path = sequence[0] + '://' + quote(sequence[1]).encode('utf8')
+                else:
+                    path = quote(path.encode('utf8'))
+            except Exception, e:
+                raise NameError, e
+
+            try:
+                return self.client.log(path, revision_start=pysvn.Revision(pysvn.opt_revision_kind.head),
+                                       revision_end=pysvn.Revision(pysvn.opt_revision_kind.number, 0),
+                                       peg_revision=pysvn.Revision(pysvn.opt_revision_kind.unspecified),
+                                       discover_changed_paths=False,
+                                       limit=entries)
+            except Exception, e:
+                raw_input(str(e))
+                raise NameError, 'Char encode error: ' + str(e)
 
     def getsvnmsg(self, path, tests=False):
         # 检查项目
@@ -175,31 +210,20 @@ class svn:
         return r
 
     def commit(self, path, msg):
-        # , recurse=True, depth=1
-        try:
-            changes = self.client.status(path)
-        except:
-            # import sys
-            # print sys.getdefaultencoding()
-            import locale
-
-            locale.setlocale(locale.LC_ALL, "")
-            # print path
-            # print isinstance(path.decode('gb2312'), unicode)
-            changes = self.client.status(path)
+        changes = self.client.status(path)
 
         files = []
         for f in changes:
-            f.path = f.path.encode('utf8')
+            filename = f.path.encode('utf8')
             if str(f.text_status) == 'normal':
                 continue
 
-            print f.path, f.text_status
+            print filename, f.text_status
             if f.text_status == pysvn.wc_status_kind.obstructed:
-                print 'obstructed:' + f.path, '您把.svn目录都给qj了.'
+                print 'obstructed:' + filename, '您把.svn目录都给qj了.'
 
             if str(f.text_status) == 'missing':
-                print 'file or directory:' + f.path + ' missing.'
+                print 'file or directory:' + filename + ' missing.'
                 # self.checkOut(path)
                 self.checkNewest(f.path)
                 self.client.remove(f.path)
@@ -207,7 +231,7 @@ class svn:
                 files.append(f.path)
 
             if f.text_status == pysvn.wc_status_kind.added:
-                print 'files to be added:', f.path
+                print 'files to be added:', filename
                 try:
                     self.client.add(f.path)
                     # self.client.checkin(f.path, 'add file or path:' + f.path)
@@ -222,26 +246,27 @@ class svn:
                     pass
 
             if f.text_status == pysvn.wc_status_kind.deleted:
-                print 'files or directory to be removed:', f.path
+                print 'files or directory to be removed:', filename
                 self.checkNewest(f.path)
                 self.client.remove(f.path)
                 # self.client.checkin(f.path, 'dele file or directory:' + f.path)
                 files.append(f.path)
 
             if f.text_status == pysvn.wc_status_kind.modified:
-                print 'files that have changed:', f.path
+                print 'files that have changed:', filename
                 # self.client.checkin(f.path, 'modifle: ' + f.path)
                 files.append(f.path)
 
             if f.text_status == pysvn.wc_status_kind.conflicted:
-                print f.path
+                print filename
 
             if f.text_status == pysvn.wc_status_kind.unversioned:
-                print 'unversioned files:', f.path
+                print 'unversioned files:', filename
                 try:
                     self.client.add(f.path)
-                except:
-                    raise NameError, u'遇到中文目录或者文件,提交失败.'
+                except Exception, e:
+                    # raise NameError, u'遇到中文目录或者文件,提交失败.'
+                    raise NameError, e
 
                 # self.client.checkin(f.path, 'add file or path:' + f.path)
                 files.append(f.path)
@@ -250,7 +275,10 @@ class svn:
             try:
                 self.client.checkin(files, msg)
             except Exception, e:
-                print path, 'is out of date; try updating.'
+                try:
+                    print path, 'is out of date; try updating.'
+                except:
+                    print path.encode('utf8'), 'is out of date; try updating.'
                 if str(e).find('is out of date; try updating') + 1:
 
                     from os.path import isfile, isdir
